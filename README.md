@@ -18,16 +18,20 @@ Download the binary for your platform from the [Releases page](https://github.co
 groundwork [flags]
 
 Flags:
-  --input     Path to the project to analyse   (default: ".")
-  --output    Directory for Terragrunt output  (default: "./output")
-  --provider  Cloud provider plugin            (default: "aws")
-  --dry-run   Print what would be generated without writing files
+  --input              Path to the project to analyse          (default: ".")
+  --output             Directory for Terragrunt output         (default: "./output")
+  --provider           Cloud provider plugin                   (default: "aws")
+  --state-bucket       S3 bucket name for Terraform state      (required)
+  --state-region       AWS region of the state bucket          (default: "us-east-1")
+  --state-lock-table   DynamoDB table name for state locking   (default: "<bucket>-lock")
+  --state-encrypt      Enable SSE-S3 encryption on state       (default: true)
+  --dry-run            Print what would be generated without writing files
 ```
 
 **Example — analyse a Go project:**
 
 ```bash
-groundwork --input ./my-project --output ./infra
+groundwork --input ./my-project --output ./infra --state-bucket my-tf-state
 ```
 
 Output:
@@ -40,7 +44,7 @@ groundwork: output written to "./infra"
 **Dry-run — preview without writing files:**
 
 ```bash
-groundwork --input ./my-project --output ./infra --dry-run
+groundwork --input ./my-project --output ./infra --state-bucket my-tf-state --dry-run
 ```
 
 Output:
@@ -76,9 +80,11 @@ remote_state {
   backend = "s3"
 
   config = {
-    bucket = "CHANGE_ME-terraform-state"
-    key    = "${path_relative_to_include()}/terraform.tfstate"
-    region = "us-east-1"
+    bucket         = "my-tf-state"
+    key            = "${path_relative_to_include()}/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "my-tf-state-lock"
   }
 
   generate = {
@@ -158,4 +164,8 @@ make run     # go run ./cmd/groundwork
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
+
+## Acknowledgements
+
+This project was designed and built with the assistance of [Claude](https://claude.ai) (Anthropic).
