@@ -44,6 +44,10 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+snapshot:
+  # Version string used for dev (--snapshot) builds.
+  version_template: "0.0.0-dev.{{.ShortCommit}}"
+
 changelog:
   sort: asc
   filters:
@@ -58,6 +62,7 @@ release:
   github:
     owner: groundwork-dev
     name: groundwork
-  draft: false
+  # "auto" marks the release as pre-release when the tag contains a suffix
+  # (e.g. v1.0.0-rc.1, v1.0.0-beta.1). Stable tags (v1.0.0) become full releases.
   prerelease: auto
   name_template: "v{{.Version}}"

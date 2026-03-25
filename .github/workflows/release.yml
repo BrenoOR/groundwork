@@ -1,0 +1,92 @@
+name: Release
+
+# ─── Triggers ────────────────────────────────────────────────────────────────
+#
+#  dev         push to main branch
+#              → snapshot build + rolling "dev" GitHub pre-release
+#
+#  pre-release push tag matching v*-* (e.g. v1.2.0-rc.1, v1.2.0-beta.1)
+#              → goreleaser full build, GitHub pre-release
+#
+#  release     push tag matching v[0-9]+.[0-9]+.[0-9]+ (e.g. v1.2.0)
+#              → goreleaser full build, GitHub stable release
+#
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: >-
+      ${{
+        github.ref_type == 'branch'      && 'dev'         ||
+        contains(github.ref_name, '-')   && 'pre-release' ||
+        'release'
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # goreleaser needs the full history for changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./... -race -count=1
+
+      # ── dev ─────────────────────────────────────────────────────────────────
+      # Build a snapshot binary (no tag required) and publish it as a rolling
+      # "dev" pre-release on GitHub so binaries are always downloadable.
+
+      - name: Build snapshot
+        if: github.ref_type == 'branch'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish rolling dev release
+        if: github.ref_type == 'branch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHORT_SHA: ${{ github.sha }}
+        run: |
+          VERSION="0.0.0-dev.${SHORT_SHA:0:7}"
+          NOTES="Automated development build from \`main\`.\n\nCommit: [\`${SHORT_SHA:0:7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})"
+
+          # Delete the previous rolling dev release and its tag (ignore errors).
+          gh release delete dev --yes --cleanup-tag 2>/dev/null || true
+
+          # Collect all archives + checksums produced by goreleaser.
+          ARTIFACTS=$(find dist -name '*.tar.gz' -o -name '*.zip' -o -name '*checksums.txt' | sort)
+
+          gh release create dev \
+            --title "dev (${SHORT_SHA:0:7})" \
+            --notes "$(printf "$NOTES")" \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            $ARTIFACTS
+
+      # ── pre-release & release ────────────────────────────────────────────────
+      # goreleaser reads the pushed tag and sets prerelease=true automatically
+      # when the tag contains a suffix (e.g. -rc.1, -beta.1).
+
+      - name: Publish tagged release
+        if: github.ref_type == 'tag'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
