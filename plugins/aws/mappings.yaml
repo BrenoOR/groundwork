@@ -1,0 +1,8 @@
+services:
+  s3:              aws_s3_bucket
+  dynamodb:        aws_dynamodb_table
+  sqs:             aws_sqs_queue
+  sns:             aws_sns_topic
+  lambda:          aws_lambda_function
+  rds:             aws_db_instance
+  secretsmanager:  aws_secretsmanager_secret
