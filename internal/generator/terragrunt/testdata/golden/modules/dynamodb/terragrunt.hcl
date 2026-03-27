@@ -5,10 +5,6 @@ include "root" {
   path = find_in_parent_folders()
 }
 
-terraform {
-  source = "tfr:///terraform-aws-modules/dynamodb/aws///"
-}
-
 inputs = {
   # TODO: fill in required inputs for aws_dynamodb_table
 }
