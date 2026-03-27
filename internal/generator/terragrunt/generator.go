@@ -32,7 +32,8 @@ func New(outputDir string) *Generator {
 //	├── terragrunt.hcl          ← root (remote_state)
 //	└── modules/
 //	    └── <spec.Name>/
-//	        └── terragrunt.hcl  ← per-resource module
+//	        ├── terragrunt.hcl  ← per-resource module
+//	        └── main.tf         ← Terraform resource definition
 func (g *Generator) Generate(specs []model.ResourceSpec, backend model.BackendConfig) error {
 	rootTmpl, err := loadTemplate("root")
 	if err != nil {
@@ -58,13 +59,37 @@ func (g *Generator) Generate(specs []model.ResourceSpec, backend model.BackendCo
 			return fmt.Errorf("generator: create module dir %q: %w", moduleDir, err)
 		}
 
-		dest := filepath.Join(moduleDir, "terragrunt.hcl")
-		if err := renderFile(moduleTmpl, spec, dest); err != nil {
+		if err := renderFile(moduleTmpl, spec, filepath.Join(moduleDir, "terragrunt.hcl")); err != nil {
 			return fmt.Errorf("generator: render module %q: %w", spec.Name, err)
+		}
+
+		tfTmpl, err := loadTFTemplate(spec.Name)
+		if err != nil {
+			return fmt.Errorf("generator: load tf template %q: %w", spec.Name, err)
+		}
+		if err := renderFile(tfTmpl, spec, filepath.Join(moduleDir, "main.tf")); err != nil {
+			return fmt.Errorf("generator: render tf %q: %w", spec.Name, err)
 		}
 	}
 
 	return nil
+}
+
+// loadTFTemplate loads a service-specific .tf template, falling back to a generic stub.
+func loadTFTemplate(service string) (*template.Template, error) {
+	path := fmt.Sprintf("templates/tf/%s.tf.tmpl", service)
+	content, err := templateFS.ReadFile(path)
+	if err != nil {
+		content, err = templateFS.ReadFile("templates/tf/generic.tf.tmpl")
+		if err != nil {
+			return nil, fmt.Errorf("generator: read tf template %q: %w", service, err)
+		}
+	}
+	tmpl, err := template.New(service).Parse(string(content))
+	if err != nil {
+		return nil, fmt.Errorf("generator: parse tf template %q: %w", service, err)
+	}
+	return tmpl, nil
 }
 
 // loadTemplate parses the named embedded template (root or module).
