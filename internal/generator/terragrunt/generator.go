@@ -14,6 +14,10 @@ import (
 //go:embed templates
 var templateFS embed.FS
 
+// TemplateFS exposes the embedded templates directory for external consumers
+// (e.g. the MCP server that serves templates as read-only resources).
+var TemplateFS = &templateFS
+
 // Generator renders Terragrunt HCL files from ResourceSpecs.
 type Generator struct {
 	OutputDir string
