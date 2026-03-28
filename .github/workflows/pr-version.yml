@@ -56,3 +56,213 @@ jobs:
               title:       proposed,
             });
             core.info(`Title updated: ${proposed}`);
+
+  # ── Validação e auto-preenchimento do template ───────────────────────────
+  fill-template:
+    name: Fill PR template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check and fill template
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr     = context.payload.pull_request;
+            const number = pr.number;
+            const body   = pr.body || '';
+
+            // ── Helpers ──────────────────────────────────────────────────
+
+            // Retorna o texto entre um cabeçalho de seção e o próximo.
+            function extractSection(text, header) {
+              const re = new RegExp(
+                `## ${header}\\s*\\n([\\s\\S]*?)(?=\\n##\\s|<!-- CI_TEST_STATUS -->|$)`,
+              );
+              const m = text.match(re);
+              return m ? m[1].trim() : null;
+            }
+
+            // Seção vazia = nula, só espaços, ou apenas comentários HTML.
+            function isEmpty(text) {
+              if (!text) return true;
+              return text.replace(/<!--[\s\S]*?-->/g, '').trim() === '';
+            }
+
+            // ── Verificar se o template está presente e preenchido ────────
+
+            const hasSections =
+              body.includes('## O que foi alterado') &&
+              body.includes('## Breaking changes')   &&
+              body.includes('## Checklist')          &&
+              body.includes('<!-- CI_TEST_STATUS -->');
+
+            const changesFilled = !isEmpty(extractSection(body, 'O que foi alterado'));
+
+            if (hasSections && changesFilled) {
+              core.info('Template OK — nenhuma ação necessária.');
+              return;
+            }
+
+            // ── Buscar commits e arquivos alterados ───────────────────────
+
+            const [{ data: commits }, { data: files }] = await Promise.all([
+              github.rest.pulls.listCommits({
+                owner: context.repo.owner, repo: context.repo.repo,
+                pull_number: number, per_page: 100,
+              }),
+              github.rest.pulls.listFiles({
+                owner: context.repo.owner, repo: context.repo.repo,
+                pull_number: number, per_page: 100,
+              }),
+            ]);
+
+            // ── Detectar breaking changes nos commits ─────────────────────
+
+            const breakingRe   = /^[a-z]+(\([^)]+\))?!:|BREAKING[- ]CHANGE/im;
+            const breakingHits = commits
+              .filter(c => breakingRe.test(c.commit.message))
+              .map(c => `- \`${c.sha.slice(0, 7)}\` ${c.commit.message.split('\n')[0]}`);
+
+            const hasBreaking      = breakingHits.length > 0;
+            const breakingCheckbox = hasBreaking ? '- [x]' : '- [ ]';
+            const breakingDetail   = hasBreaking
+              ? '\n\n**Breaking changes detectados automaticamente:**\n' + breakingHits.join('\n')
+              : '\n\n<!-- Se marcado, descreva o impacto e o caminho de migração necessário. -->';
+
+            // ── Construir seção "O que foi alterado" ─────────────────────
+            // Tabela resumo + seções <details> colapsáveis com o diff de
+            // cada arquivo (limitadas a 20 arquivos / 1500 chars por patch).
+
+            const STATUS_PT = {
+              added: 'adicionado', modified: 'modificado', removed: 'removido',
+              renamed: 'renomeado', copied: 'copiado', changed: 'modificado',
+            };
+
+            const tableHeader = '| Arquivo | Status | +/- |';
+            const tableSep    = '|---------|--------|-----|';
+            const tableRows   = files.map(f => {
+              const st = STATUS_PT[f.status] || f.status;
+              return `| \`${f.filename}\` | ${st} | +${f.additions} / -${f.deletions} |`;
+            });
+
+            const MAX_PATCH  = 1500;
+            const MAX_DETAIL = 20;
+            const details    = files
+              .filter(f => f.patch)
+              .slice(0, MAX_DETAIL)
+              .map(f => {
+                const st    = STATUS_PT[f.status] || f.status;
+                let patch   = f.patch;
+                const cut   = patch.length > MAX_PATCH;
+                if (cut) patch = patch.slice(0, MAX_PATCH) + '\n... (truncado)';
+                return [
+                  `<details>`,
+                  `<summary><code>${f.filename}</code> — ${st} (+${f.additions} / -${f.deletions})</summary>`,
+                  '',
+                  '```diff',
+                  patch,
+                  '```',
+                  '',
+                  '</details>',
+                ].join('\n');
+              });
+
+            const changesSection = [
+              tableHeader, tableSep, ...tableRows,
+              '',
+              ...details,
+            ].join('\n');
+
+            // ── Inferir checklist a partir dos arquivos e commits ─────────
+
+            const testRe        = /(_test\.go|_test\.py|test_.*\.(go|py)|\.test\.[jt]sx?|\.spec\.[jt]sx?|\/(tests?|__tests?__)\/)/;
+            const docRe         = /(\.md$|^docs\/|README|CHANGELOG)/i;
+            const conventRe     = /^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([^)]+\))?!?:\s.+/;
+
+            const hasTestFiles  = files.some(f => testRe.test(f.filename));
+            const hasDocFiles   = files.some(f => docRe.test(f.filename));
+            const allConventional = commits.every(c =>
+              conventRe.test(c.commit.message.split('\n')[0])
+            );
+
+            const checkTests  = hasTestFiles    ? '- [x]' : '- [ ]';
+            const checkDocs   = hasDocFiles     ? '- [x]' : '- [ ]';
+            const checkCommit = allConventional ? '- [x]' : '- [ ]';
+
+            // ── Construir novo body ───────────────────────────────────────
+
+            let newBody;
+
+            if (hasSections && !changesFilled) {
+              // Template presente mas "O que foi alterado" vazia:
+              // substitui apenas essa seção e atualiza a checklist.
+              newBody = body
+                .replace(
+                  /## O que foi alterado[\s\S]*?(?=## Breaking changes)/,
+                  `## O que foi alterado\n\n${changesSection}\n\n`,
+                )
+                .replace(/- \[.\] Testes adicionados ou atualizados/, checkTests  + ' Testes adicionados ou atualizados')
+                .replace(/- \[.\] Documentação atualizada[^\n]*$/m,   checkDocs   + ' Documentação atualizada (`README`, `docs/`)')
+                .replace(/- \[.\] Commits seguem[^\n]*$/m,            checkCommit + ' Commits seguem [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `feat!:` etc.)');
+            } else {
+              // Template ausente ou body vazio: reconstrói do zero.
+              newBody = [
+                '## O que foi alterado',
+                '',
+                changesSection,
+                '',
+                '## Breaking changes',
+                '',
+                `${breakingCheckbox} Esta PR contém breaking changes`,
+                breakingDetail,
+                '',
+                '## Checklist',
+                '',
+                `${checkTests} Testes adicionados ou atualizados`,
+                `${checkDocs} Documentação atualizada (\`README\`, \`docs/\`)`,
+                `${checkCommit} Commits seguem [Conventional Commits](https://www.conventionalcommits.org) (\`feat:\`, \`fix:\`, \`feat!:\` etc.)`,
+                '',
+                '---',
+                '',
+                '## Status dos testes',
+                '',
+                '<!-- CI_TEST_STATUS -->',
+                '> ⏳ Aguardando execução do CI...',
+                '<!-- /CI_TEST_STATUS -->',
+              ].join('\n');
+            }
+
+            await github.rest.pulls.update({
+              owner:       context.repo.owner,
+              repo:        context.repo.repo,
+              pull_number: number,
+              body:        newBody,
+            });
+
+            // ── Notificar autor (apenas na abertura do PR) ────────────────
+
+            if (context.payload.action === 'opened') {
+              const what = [];
+              if (!hasSections)    what.push('o template de PR foi aplicado');
+              if (!changesFilled)  what.push('"O que foi alterado" foi preenchido com a tabela de arquivos e diffs');
+              if (hasBreaking)     what.push('"Breaking changes" foi marcado automaticamente');
+              if (hasTestFiles)    what.push('checklist: "Testes" marcado (arquivos de teste detectados)');
+              if (hasDocFiles)     what.push('checklist: "Documentação" marcado (arquivos de doc detectados)');
+              if (allConventional) what.push('checklist: "Conventional Commits" marcado (todos os commits seguem o padrão)');
+
+              const notice = [
+                '> [!NOTE]',
+                '> **O body desta PR foi preenchido automaticamente:**',
+                ...what.map(w => `> - ${w}`),
+                '>',
+                '> Revise o conteúdo e ajuste o que for necessário antes do merge.',
+              ].join('\n');
+
+              await github.rest.issues.createComment({
+                owner:        context.repo.owner,
+                repo:         context.repo.repo,
+                issue_number: number,
+                body:         notice,
+              });
+            }
+
+            core.warning('Template auto-preenchido — autor deve revisar.');
