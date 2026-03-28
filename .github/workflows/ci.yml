@@ -2,26 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
+
+permissions:
+  contents: read
+  pull-requests: write  # necessário para atualizar o corpo do PR com o status dos testes
 
 jobs:
-#  lint:
-#    name: Lint
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#      - uses: actions/setup-go@v5
-#        with:
-#          go-version-file: go.mod
-#          cache: false
-#
-#      - uses: golangci/golangci-lint-action@v6
-#        with:
-#          version: latest
-
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -33,4 +22,70 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test ./... -race -count=1
+        id: run_tests
+        # Continua mesmo em falha para que o passo de status possa registrar o erro.
+        continue-on-error: true
+        run: go test ./... -race -count=1 2>&1 | tee test_output.txt; exit ${PIPESTATUS[0]}
+
+      - name: Update test status in PR body
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs      = require('fs');
+            const outcome = '${{ steps.run_tests.outcome }}';
+            const output  = fs.readFileSync('test_output.txt', 'utf8').trim();
+            const icon    = outcome === 'success' ? '✅' : '❌';
+            const label   = outcome === 'success' ? 'Passou' : 'Falhou';
+            const sha     = context.payload.pull_request.head.sha.slice(0, 7);
+            const run_url = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+
+            const block = [
+              `> ${icon} **${label}** · commit \`${sha}\` · [ver log](${run_url})`,
+              '',
+              '```',
+              output.slice(-3000),   // limita para não ultrapassar o tamanho máximo do body
+              '```',
+            ].join('\n');
+
+            // Substitui o conteúdo entre os marcadores no body do PR.
+            const pr      = context.payload.pull_request;
+            const body    = pr.body || '';
+            const start   = '<!-- CI_TEST_STATUS -->';
+            const end     = '<!-- /CI_TEST_STATUS -->';
+            const updated = body.replace(
+              new RegExp(`${start}[\\s\\S]*?${end}`),
+              `${start}\n${block}\n${end}`,
+            );
+
+            if (body === updated) {
+              core.warning('Marcadores CI_TEST_STATUS não encontrados no body do PR.');
+              return;
+            }
+
+            await github.rest.pulls.update({
+              owner:       context.repo.owner,
+              repo:        context.repo.repo,
+              pull_number: pr.number,
+              body:        updated,
+            });
+
+      # Re-falha o job se os testes falharam (continue-on-error acima apenas
+      # impediu a interrupção antes do passo de status).
+      - name: Propagate test failure
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
+
+  # Garante que PRs para main só vêm de dev.
+  # Executa apenas em PRs — passa silenciosamente em pushes diretos.
+  check-source-branch:
+    name: check-source-branch
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    steps:
+      - name: Validate source branch
+        run: |
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "ERROR: PRs to main must come from dev (got: ${{ github.head_ref }})"
+            exit 1
+          fi
