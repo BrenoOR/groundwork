@@ -2,26 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
-#  lint:
-#    name: Lint
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#      - uses: actions/setup-go@v5
-#        with:
-#          go-version-file: go.mod
-#          cache: false
-#
-#      - uses: golangci/golangci-lint-action@v6
-#        with:
-#          version: latest
-
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -34,3 +19,17 @@ jobs:
 
       - name: Run tests
         run: go test ./... -race -count=1
+
+  # Garante que PRs para main só vêm de dev.
+  # Executa apenas em PRs — passa silenciosamente em pushes diretos.
+  check-source-branch:
+    name: check-source-branch
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    steps:
+      - name: Validate source branch
+        run: |
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "ERROR: PRs to main must come from dev (got: ${{ github.head_ref }})"
+            exit 1
+          fi
