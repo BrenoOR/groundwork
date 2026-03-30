@@ -2,66 +2,38 @@ name: Release
 
 # ─── Triggers ────────────────────────────────────────────────────────────────
 #
-#  auto-tag     push para dev (merge de PR)
-#               → cria tag v X.Y.Z-dev.N  →  dispara o job release abaixo
+#  dev         push to main branch
+#              → snapshot build + rolling "dev" GitHub pre-release
 #
-#  auto-tag     push para main (merge de PR de dev)
-#               → cria tag vX.Y.Z  →  dispara o job release abaixo
+#  pre-release push tag matching v*-* (e.g. v1.2.0-rc.1, v1.2.0-beta.1)
+#              → goreleaser full build, GitHub pre-release
 #
-#  release      push de tag v* (criado pelo job de auto-tag acima)
-#               → goreleaser full build
-#               → prerelease=auto: sufixo "-dev.N" → pre-release, sem sufixo → release estável
+#  release     push tag matching v[0-9]+.[0-9]+.[0-9]+ (e.g. v1.2.0)
+#              → goreleaser full build, GitHub stable release
 #
 on:
   push:
-    branches: [dev, main]
-    tags: ["v*"]
+    branches:
+      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
-  # ── Auto-tag ─────────────────────────────────────────────────────────────
-  # Roda apenas em pushes de branch (merge de PR).
-  # Lê os commits convencionais desde a última tag para calcular o bump,
-  # cria a tag e a empurra — isso dispara este mesmo workflow novamente
-  # com ref_type == 'tag', executando o job 'release' abaixo.
-  auto-tag:
-    name: Auto-tag
-    runs-on: ubuntu-latest
-    if: github.ref_type == 'branch'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Bump version and push tag
-        uses: mathieudutour/github-tag-action@v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          # main  → tag estável:    vX.Y.Z
-          # dev   → tag pre-release: vX.Y.Z-dev.N
-          release_branches: main
-          pre_release_branches: dev
-          # bump padrão quando não há conventional commits reconhecíveis
-          default_bump: patch
-          tag_prefix: v
-
-  # ── Build & publish ───────────────────────────────────────────────────────
-  # Roda apenas em pushes de tag (criados pelo job auto-tag acima ou manualmente).
-  # goreleaser usa prerelease: auto — tag com sufixo vira pre-release,
-  # tag limpa (vX.Y.Z) vira release estável.
   release:
     name: >-
       ${{
-        contains(github.ref_name, '-') && 'pre-release' || 'release'
+        github.ref_type == 'branch'      && 'dev'         ||
+        contains(github.ref_name, '-')   && 'pre-release' ||
+        'release'
       }}
     runs-on: ubuntu-latest
-    if: github.ref_type == 'tag'
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # goreleaser needs the full history for changelog
 
       - uses: actions/setup-go@v5
         with:
@@ -71,7 +43,47 @@ jobs:
       - name: Run tests
         run: go test ./... -race -count=1
 
-      - name: Publish release
+      # ── dev ─────────────────────────────────────────────────────────────────
+      # Build a snapshot binary (no tag required) and publish it as a rolling
+      # "dev" pre-release on GitHub so binaries are always downloadable.
+
+      - name: Build snapshot
+        if: github.ref_type == 'branch'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish rolling dev release
+        if: github.ref_type == 'branch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHORT_SHA: ${{ github.sha }}
+        run: |
+          VERSION="0.0.0-dev.${SHORT_SHA:0:7}"
+          NOTES="Automated development build from \`main\`.\n\nCommit: [\`${SHORT_SHA:0:7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})"
+
+          # Delete the previous rolling dev release and its tag (ignore errors).
+          gh release delete dev --yes --cleanup-tag 2>/dev/null || true
+
+          # Collect all archives + checksums produced by goreleaser.
+          ARTIFACTS=$(find dist -name '*.tar.gz' -o -name '*.zip' -o -name '*checksums.txt' | sort)
+
+          gh release create dev \
+            --title "dev (${SHORT_SHA:0:7})" \
+            --notes "$(printf "$NOTES")" \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            $ARTIFACTS
+
+      # ── pre-release & release ────────────────────────────────────────────────
+      # goreleaser reads the pushed tag and sets prerelease=true automatically
+      # when the tag contains a suffix (e.g. -rc.1, -beta.1).
+
+      - name: Publish tagged release
+        if: github.ref_type == 'tag'
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
