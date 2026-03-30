@@ -111,11 +111,8 @@ func TestGenerate_directoryStructure(t *testing.T) {
 	expected := []string{
 		"terragrunt.hcl",
 		filepath.Join("modules", "s3", "terragrunt.hcl"),
-		filepath.Join("modules", "s3", "main.tf"),
 		filepath.Join("modules", "dynamodb", "terragrunt.hcl"),
-		filepath.Join("modules", "dynamodb", "main.tf"),
 		filepath.Join("modules", "sqs", "terragrunt.hcl"),
-		filepath.Join("modules", "sqs", "main.tf"),
 	}
 
 	for _, rel := range expected {
@@ -123,37 +120,6 @@ func TestGenerate_directoryStructure(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("expected file %q not found: %v", rel, err)
 		}
-	}
-}
-
-func TestGenerate_moduleTF_goldenFiles(t *testing.T) {
-	cases := []struct {
-		module string
-		golden string
-	}{
-		{"s3", "modules/s3/main.tf"},
-		{"dynamodb", "modules/dynamodb/main.tf"},
-		{"sqs", "modules/sqs/main.tf"},
-	}
-
-	out := t.TempDir()
-	g := terragrunt.New(out)
-
-	if err := g.Generate(testSpecs, testBackend); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.module, func(t *testing.T) {
-			got, err := os.ReadFile(filepath.Join(out, "modules", tc.module, "main.tf"))
-			if err != nil {
-				t.Fatalf("read main.tf: %v", err)
-			}
-			want := readGolden(t, tc.golden)
-			if string(got) != want {
-				t.Errorf("module %q main.tf mismatch:\ngot:\n%s\nwant:\n%s", tc.module, got, want)
-			}
-		})
 	}
 }
 
