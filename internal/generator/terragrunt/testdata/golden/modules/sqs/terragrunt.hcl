@@ -5,6 +5,10 @@ include "root" {
   path = find_in_parent_folders()
 }
 
+terraform {
+  source = "tfr:///terraform-aws-modules/sqs/aws///"
+}
+
 inputs = {
   # TODO: fill in required inputs for aws_sqs_queue
 }
