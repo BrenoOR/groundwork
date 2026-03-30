@@ -117,6 +117,70 @@ func TestDetector_deduplicatesServices(t *testing.T) {
 	}
 }
 
+func TestDetector_javaServicesSDKv2(t *testing.T) {
+	d := &awsplugin.Detector{}
+	files := []model.SourceFile{testdataFile("java_app.java", "java")}
+
+	sdks, err := d.Detect(files)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	svcs := sortedServices(sdks)
+	want := []string{"dynamodb", "s3", "secretsmanager", "sqs"}
+	if !equalSlices(svcs, want) {
+		t.Errorf("java detector: got %v, want %v", svcs, want)
+	}
+}
+
+func TestDetector_javaSDKv1VersionSuffix(t *testing.T) {
+	d := &awsplugin.Detector{}
+	src := []byte(`import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;`)
+	files := []model.SourceFile{{Path: "App.java", Language: "java", Content: src}}
+
+	sdks, err := d.Detect(files)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	svcs := sortedServices(sdks)
+	if len(svcs) != 1 || svcs[0] != "dynamodb" {
+		t.Errorf("expected [dynamodb], got %v", svcs)
+	}
+}
+
+func TestDetector_javaDeduplicatesAcrossSDKVersions(t *testing.T) {
+	d := &awsplugin.Detector{}
+	src := []byte(`
+import software.amazon.awssdk.services.s3.S3Client;
+import com.amazonaws.services.s3.AmazonS3;
+`)
+	files := []model.SourceFile{{Path: "App.java", Language: "java", Content: src}}
+
+	sdks, err := d.Detect(files)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	svcs := sortedServices(sdks)
+	if len(svcs) != 1 || svcs[0] != "s3" {
+		t.Errorf("expected exactly [s3], got %v", svcs)
+	}
+}
+
+func TestDetector_javaNoAWSUsage(t *testing.T) {
+	d := &awsplugin.Detector{}
+	files := []model.SourceFile{
+		{Path: "App.java", Language: "java", Content: []byte(`public class App {}`)},
+	}
+
+	sdks, err := d.Detect(files)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sdks) != 0 {
+		t.Errorf("expected no SDKs, got %v", sdks)
+	}
+}
+
 func equalSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

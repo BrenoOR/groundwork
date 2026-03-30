@@ -19,6 +19,17 @@ var (
 
 	// @aws-sdk/client-<service> (package.json dep or JS/TS import)
 	nodePackageRe = regexp.MustCompile(`@aws-sdk/client-([\w-]+)`)
+
+	// import software.amazon.awssdk.services.<service>.<Class> (SDK v2)
+	javaSDKv2Re = regexp.MustCompile(`import\s+software\.amazon\.awssdk\.services\.(\w+)`)
+
+	// import com.amazonaws.services.<service>.<Class> (SDK v1)
+	javaSDKv1Re = regexp.MustCompile(`import\s+com\.amazonaws\.services\.(\w+)`)
+
+	// SDK v1 package names carry a version suffix like "v2" (e.g. "dynamodbv2").
+	// This pattern matches only "v" followed by digits at the end of a word,
+	// so "ec2" (no leading "v") is preserved as-is.
+	javaV1VersionRe = regexp.MustCompile(`v\d+$`)
 )
 
 // Detector identifies AWS SDK usage across Go, Python, and Node.js source files.
@@ -40,6 +51,8 @@ func (d *Detector) Detect(files []model.SourceFile) ([]model.DetectedSDK, error)
 			services = extractMatches(pythonClientRe, src, 1)
 		case "nodejs":
 			services = extractNodeServices(src)
+		case "java":
+			services = extractJavaServices(src)
 		}
 
 		for _, svc := range services {
@@ -76,6 +89,34 @@ func extractMatches(re *regexp.Regexp, src string, group int) []string {
 // JS/TS require/import statements.
 func extractNodeServices(src string) []string {
 	return extractMatches(nodePackageRe, src, 1)
+}
+
+// extractJavaServices collects AWS service names from Java source files,
+// handling both SDK v2 (software.amazon.awssdk) and SDK v1 (com.amazonaws).
+func extractJavaServices(src string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, svc := range extractMatches(javaSDKv2Re, src, 1) {
+		n := normalizeService(svc)
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	for _, svc := range extractMatches(javaSDKv1Re, src, 1) {
+		n := normalizeService(stripVersionSuffix(svc))
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// stripVersionSuffix removes trailing "v<N>" version suffixes from SDK v1
+// service package names (e.g. "dynamodbv2" → "dynamodb", "ec2" stays "ec2").
+func stripVersionSuffix(svc string) string {
+	return javaV1VersionRe.ReplaceAllString(strings.ToLower(svc), "")
 }
 
 // normalizeService lower-cases and strips common suffixes so that
