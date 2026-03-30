@@ -122,6 +122,38 @@ func TestScan_contentMatchesDisk(t *testing.T) {
 	}
 }
 
+func TestScan_javaProject(t *testing.T) {
+	s := scanner.New(testdataPath("java_project"))
+	files, err := s.Scan()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(files) == 0 {
+		t.Fatal("expected at least one file")
+	}
+	for _, f := range files {
+		if f.Language != "java" {
+			t.Errorf("file %q: expected language %q, got %q", f.Path, "java", f.Language)
+		}
+	}
+
+	names := make([]string, 0, len(files))
+	for _, f := range files {
+		names = append(names, filepath.Base(f.Path))
+	}
+	sort.Strings(names)
+	found := false
+	for _, n := range names {
+		if n == "App.java" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected App.java in results, got %v", names)
+	}
+}
+
 func TestScan_invalidPath(t *testing.T) {
 	s := scanner.New("/nonexistent/path/that/does/not/exist")
 	_, err := s.Scan()

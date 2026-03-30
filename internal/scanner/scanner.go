@@ -13,10 +13,13 @@ import (
 // When a marker is found in a directory, all source files under that
 // directory are tagged with the corresponding language.
 var languageMarkers = map[string]string{
-	"go.mod":           "go",
-	"package.json":     "nodejs",
-	"requirements.txt": "python",
-	"pyproject.toml":   "python",
+	"go.mod":            "go",
+	"package.json":      "nodejs",
+	"requirements.txt":  "python",
+	"pyproject.toml":    "python",
+	"pom.xml":           "java",
+	"build.gradle":      "java",
+	"build.gradle.kts":  "java",
 }
 
 // skipDirs contains directory names that should never be walked.
