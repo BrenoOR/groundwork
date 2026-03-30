@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -84,6 +85,11 @@ func run(args []string) error {
 	if len(allowedRoots) == 0 {
 		return fmt.Errorf("--allowed-root is required (specify at least one directory)")
 	}
+	for _, r := range allowedRoots {
+		if !filepath.IsAbs(r) {
+			return fmt.Errorf("--allowed-root %q must be an absolute path (got relative path)", r)
+		}
+	}
 
 	cfg := mcpserver.Config{
 		AllowedRoots:          []string(allowedRoots),
@@ -99,6 +105,12 @@ func run(args []string) error {
 	s, err := mcpserver.New(cfg)
 	if err != nil {
 		return fmt.Errorf("init server: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "groundwork-mcp: transport=%s readonly=%v rate-limit=%.0f/s max-files=%d max-project-bytes=%d max-file-bytes=%d\n",
+		*transport, *readOnly, *rateLimit, *maxFiles, *maxProjectBytes, *maxFileBytes)
+	for _, r := range allowedRoots {
+		fmt.Fprintf(os.Stderr, "groundwork-mcp: allowed-root %s\n", r)
 	}
 
 	switch *transport {
