@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -46,6 +47,9 @@ func (s *Scanner) Scan() ([]model.SourceFile, error) {
 
 	err := filepath.WalkDir(s.RootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				return filepath.SkipDir
+			}
 			return err
 		}
 		if d.IsDir() && skipDirs[d.Name()] {
@@ -71,6 +75,9 @@ func (s *Scanner) Scan() ([]model.SourceFile, error) {
 
 	err = filepath.WalkDir(s.RootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				return filepath.SkipDir
+			}
 			return err
 		}
 		if d.IsDir() {
@@ -96,6 +103,9 @@ func (s *Scanner) Scan() ([]model.SourceFile, error) {
 
 		content, err := os.ReadFile(path)
 		if err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				return nil
+			}
 			return err
 		}
 

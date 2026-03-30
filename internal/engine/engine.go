@@ -46,6 +46,10 @@ func New(cfg Config, reg *registry.Registry) *Engine {
 //  2. Detect + Map: run all registered plugins and collect ResourceSpecs.
 //  3. Generate: render Terragrunt files into OutputDir (skipped on DryRun).
 func (e *Engine) Run() error {
+	fmt.Fprintf(e.stderr, "groundwork: input=%q output=%q dry-run=%v\n", e.cfg.InputDir, e.cfg.OutputDir, e.cfg.DryRun)
+	fmt.Fprintf(e.stderr, "groundwork: state bucket=%q region=%q lock-table=%q encrypt=%v\n",
+		e.cfg.Backend.Bucket, e.cfg.Backend.Region, e.cfg.Backend.LockTable, e.cfg.Backend.Encrypt)
+
 	// 1. Scan
 	files, err := e.scanner.Scan()
 	if err != nil {
@@ -69,6 +73,9 @@ func (e *Engine) Run() error {
 	// 3. Generate (or dry-run preview)
 	if e.cfg.DryRun {
 		return e.printDryRun(specs)
+	}
+	for _, s := range specs {
+		fmt.Fprintf(e.stderr, "groundwork: generating module %q (%s)\n", s.Name, s.Type)
 	}
 	if err := e.gen.Generate(specs, e.cfg.Backend); err != nil {
 		return fmt.Errorf("engine: generate: %w", err)

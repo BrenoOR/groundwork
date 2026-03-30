@@ -94,6 +94,26 @@ func HandleScan(
 		}
 
 		var warnings []string
+
+		// Enforce total project size limit before truncating by file count.
+		if limits.MaxProjectBytes > 0 {
+			var totalBytes int64
+			for _, f := range files {
+				totalBytes += int64(len(f.Content))
+			}
+			if totalBytes > limits.MaxProjectBytes {
+				auditor.Log(guardrails.AuditEntry{
+					Tool:   "groundwork_scan",
+					Result: "blocked",
+					Reason: fmt.Sprintf("project size %d bytes exceeds max-project-bytes limit of %d", totalBytes, limits.MaxProjectBytes),
+				})
+				return mcp.NewToolResultErrorf(
+					"project size %d bytes exceeds --max-project-bytes limit of %d bytes; use --max-project-bytes to raise the limit",
+					totalBytes, limits.MaxProjectBytes,
+				), nil
+			}
+		}
+
 		if len(files) > limits.MaxFiles {
 			warnings = append(warnings, fmt.Sprintf(
 				"file limit reached (%d max); only the first %d files were analysed",
