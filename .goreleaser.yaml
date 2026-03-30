@@ -9,8 +9,8 @@ before:
 
 builds:
   - id: groundwork
-    main: ./cmd/groundwork
-    binary: groundwork
+    main: ./cmd/groundwork-mcp
+    binary: groundwork-mcp
     env:
       - CGO_ENABLED=0
     goos:
